@@ -34,12 +34,18 @@ thr_output=$(sysbench threads --time=10 run 2>&1)
 thr_value=$(echo "$thr_output" | grep -E "total number of events:" | grep -Eo '[0-9]+' | tail -n 1)
 thr_value=${thr_value:-0}
 
-# 5️⃣ Mutex Benchmark - Extract "total number of events"
+# 5️⃣ Mutex Benchmark - Extract "time per event"
 mutex_output=$(sysbench mutex --time=10 run 2>&1)
-mutex_value=$(echo "$mutex_output" | grep -E "total number of events:" | grep -Eo '[0-9]+' | tail -n 1)
-mutex_value=${mutex_value:-0}
+mutex_events=$(echo "$mutex_output" | grep -E "total number of events:" | grep -Eo '[0-9]+' | tail -n 1)
+mutex_events=${mutex_events:-1} # Avoid division by zero
+
+mutex_time=$(echo "$mutex_output" | grep -E "total time:" | grep -Eo '[0-9]+\.[0-9]+' | tail -n 1)
+mutex_time=${mutex_time:-0.00}
+
+# Calculate time per event (execution time / total events)
+mutex_time_per_event=$(awk "BEGIN {print $mutex_time / $mutex_events}")
 
 # Generate CSV output
-result="${cpu_value},${mem_value},${fio_value},${thr_value},${mutex_value}"
+result="${cpu_value},${mem_value},${fio_value},${thr_value},${mutex_time_per_event}"
 echo "$result" > "$OUTPUT_FILE"
 echo "$result"
