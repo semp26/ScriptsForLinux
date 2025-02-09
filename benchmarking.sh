@@ -1,85 +1,69 @@
 #!/bin/bash
-# run_sysbench.sh
+# run_sysbench_one_line.sh
 #
-# This script runs a suite of sysbench benchmarks and saves a minimalistic
-# summary of each test (capturing only the last few lines of output) to a text file.
+# This script runs several sysbench tests:
+#   - CPU (single-threaded; metric: events per second)
+#   - Memory (metric: MB/sec transferred)
+#   - File I/O (metric: read throughput in MiB/s)
+#   - Threads (metric: events per second)
+#   - Mutex (metric: events per second)
 #
-# Make sure sysbench is installed on your system.
+# It extracts one numeric value from each test’s output and writes
+# a single comma-separated line with just the values to the output file.
+#
+# Usage:
+#   chmod +x run_sysbench_one_line.sh
+#   ./run_sysbench_one_line.sh
+#
+# Expected output format (one line):
+#   <cpu>,<memory>,<fileio>,<threads>,<mutex>
+#
+# Example:
+#   1234.56,205.78,98.76,543.21,8765.43
+#
 
-OUTPUT_FILE="sysbench_results.txt"
-
-# Print a header to the output file.
-cat <<EOF > "$OUTPUT_FILE"
-========================================
-       Sysbench Benchmark Report Summary
-       Started: $(date)
-========================================
-
-EOF
-
-# Helper function to run a benchmark test,
-# capture its output, and then extract a short summary.
-run_benchmark() {
-    local test_label="$1"
-    shift
-    echo ">> Starting ${test_label}..." | tee -a "$OUTPUT_FILE"
-    # Run the sysbench command passed as arguments and capture the output.
-    output=$("$@" 2>&1)
-    # Extract the last 5 lines of output (assumed to be the summary).
-    summary=$(echo "$output" | tail -n 5)
-    echo "$summary" | tee -a "$OUTPUT_FILE"
-    echo ">> Completed ${test_label}." | tee -a "$OUTPUT_FILE"
-    echo "" | tee -a "$OUTPUT_FILE"
-}
-
-# Check if sysbench is installed.
+# Check that sysbench is installed.
 if ! command -v sysbench >/dev/null 2>&1; then
     echo "Error: sysbench is not installed. Please install sysbench and try again." >&2
     exit 1
 fi
 
-##############################
-# CPU Benchmark (Single Core)
-##############################
-run_benchmark "CPU Benchmark (Single Core)" sysbench cpu --cpu-max-prime=20000 --threads=1 run
+# 1. CPU Benchmark (Single Thread)
+#    We'll extract the "events per second" value.
+cpu_output=$(sysbench cpu --cpu-max-prime=20000 --threads=1 run 2>&1)
+# Expecting a line like: "events per second:  1234.56"
+cpu_value=$(echo "$cpu_output" | grep "events per second:" | tail -n 1 | awk '{print $NF}')
 
-#############################
-# CPU Benchmark (All Cores)
-#############################
-NUM_THREADS=$(nproc)
-run_benchmark "CPU Benchmark (All Cores with ${NUM_THREADS} Threads)" sysbench cpu --cpu-max-prime=20000 --threads="$NUM_THREADS" run
+# 2. Memory Benchmark
+#    We'll try to extract the throughput in MB/sec.
+#    Depending on sysbench version, the output may contain a line similar to:
+#       "transferred (MB/sec): 205.78"
+mem_output=$(sysbench memory --memory-total-size=10G run 2>&1)
+mem_value=$(echo "$mem_output" | grep -i "MB/sec" | grep -oE '[0-9]+\.[0-9]+' | tail -n 1)
 
-########################
-# Memory Benchmark Test
-########################
-run_benchmark "Memory Benchmark" sysbench memory --memory-total-size=10G run
+# 3. File I/O Benchmark
+#    We extract the "read, MiB/s:" value.
+#    Example output line: "read, MiB/s:  98.76"
+fio_output=$(sysbench fileio --file-total-size=1G run 2>&1)
+fio_value=$(echo "$fio_output" | grep "read, MiB/s:" | grep -oE '[0-9]+\.[0-9]+' | tail -n 1)
 
-#############################
-# File I/O Benchmark Test
-#############################
-echo ">> Starting File I/O Benchmark..." | tee -a "$OUTPUT_FILE"
-echo ">> Preparing test files..." | tee -a "$OUTPUT_FILE"
-prepare_out=$(sysbench fileio --file-total-size=1G prepare 2>&1)
-# (Optionally, you can omit or further summarize the prepare phase.)
-echo ">> Running File I/O test..." | tee -a "$OUTPUT_FILE"
-fio_run_out=$(sysbench fileio --file-total-size=1G run 2>&1)
-echo ">> Cleaning up test files..." | tee -a "$OUTPUT_FILE"
-cleanup_out=$(sysbench fileio --file-total-size=1G cleanup 2>&1)
-# Capture only the summary from the 'run' phase.
-fio_summary=$(echo "$fio_run_out" | tail -n 5)
-echo "$fio_summary" | tee -a "$OUTPUT_FILE"
-echo ">> Completed File I/O Benchmark." | tee -a "$OUTPUT_FILE"
-echo "" | tee -a "$OUTPUT_FILE"
+# 4. Threads Benchmark
+#    Extract the "events per second" value.
+thr_output=$(sysbench threads run 2>&1)
+thr_value=$(echo "$thr_output" | grep "events per second:" | tail -n 1 | awk '{print $NF}')
 
-########################
-# Threads Benchmark Test
-########################
-run_benchmark "Threads Benchmark" sysbench threads run
+# 5. Mutex Benchmark
+#    Extract the "events per second" value.
+mutex_output=$(sysbench mutex run 2>&1)
+mutex_value=$(echo "$mutex_output" | grep "events per second:" | tail -n 1 | awk '{print $NF}')
 
-########################
-# Mutex Benchmark Test
-########################
-run_benchmark "Mutex Benchmark" sysbench mutex run
+# Combine the values into one comma-separated line.
+# Order: CPU events/sec, Memory MB/sec, File I/O (read MiB/s), Threads events/sec, Mutex events/sec
+result="${cpu_value},${mem_value},${fio_value},${thr_value},${mutex_value}"
 
-echo "========================================" | tee -a "$OUTPUT_FILE"
-echo "Benchmarking complete. Summary saved in: $OUTPUT_FILE" | tee -a "$OUTPUT_FILE"
+# Write the single-line result to the output file.
+OUTPUT_FILE="sysbench_values.txt"
+echo "$result" > "$OUTPUT_FILE"
+
+# Also print the result to the console.
+echo "$result"
