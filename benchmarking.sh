@@ -29,15 +29,15 @@ fio_value=$(echo "$fio_output" | grep -E "read, MiB/s:" | grep -Eo '[0-9]+\.[0-9
 fio_value=${fio_value:-0.00}
 sysbench fileio --file-total-size=1G cleanup > /dev/null 2>&1
 
-# 4️⃣ Threads Benchmark (Fixed) - Extract "events per second"
+# 4️⃣ Threads Benchmark - Extract "total number of events"
 thr_output=$(sysbench threads --time=10 run 2>&1)
-thr_value=$(echo "$thr_output" | grep -E "events per second:" | grep -Eo '[0-9]+\.[0-9]+' | tail -n 1)
-thr_value=${thr_value:-0.00}
+thr_value=$(echo "$thr_output" | grep -E "total number of events:" | grep -Eo '[0-9]+' | tail -n 1)
+thr_value=${thr_value:-0}
 
-# 5️⃣ Mutex Benchmark (Fixed) - Extract "events per second"
+# 5️⃣ Mutex Benchmark - Extract "total number of events"
 mutex_output=$(sysbench mutex --time=10 run 2>&1)
-mutex_value=$(echo "$mutex_output" | grep -E "events per second:" | grep -Eo '[0-9]+\.[0-9]+' | tail -n 1)
-mutex_value=${mutex_value:-0.00}
+mutex_value=$(echo "$mutex_output" | grep -E "total number of events:" | grep -Eo '[0-9]+' | tail -n 1)
+mutex_value=${mutex_value:-0}
 
 # Generate CSV output
 result="${cpu_value},${mem_value},${fio_value},${thr_value},${mutex_value}"
