@@ -1,16 +1,14 @@
 #!/bin/bash
 # run_benchmarks.sh
 #
-# This script installs the required packages on a fresh Ubuntu Server 24.04,
-# then collects system info, runs disk I/O tests with fio,
+# This script installs required packages on a fresh Ubuntu Server 24.04,
+# then gathers basic system info, runs disk I/O tests with fio,
 # network tests with iperf3, and a Geekbench 5 benchmark.
 #
-# It generates a report similar to your sample.
+# It prints progress messages to the console and saves a report (similar to your sample)
+# in a timestamped file. Estimated total run time is ~15 minutes.
 #
-# IMPORTANT:
-# - Run this script with Bash, not sh:
-#       sudo bash run_benchmarks.sh
-# - An active Internet connection is required.
+# IMPORTANT: Run this with Bash (e.g., sudo bash run_benchmarks.sh)
 
 # --- Ensure noninteractive installation ---
 export DEBIAN_FRONTEND=noninteractive
@@ -21,10 +19,16 @@ if [[ $EUID -ne 0 ]]; then
   exit 1
 fi
 
+# --- Record start time ---
+START_TIME=$(date +%s)
+
+echo "Starting Benchmark Script. Estimated total run time: ~15 minutes."
+
 # --- Update package lists and install dependencies ---
 echo "Updating package lists and installing dependencies..."
 apt update
 apt install -y fio iperf3 jq wget tar
+echo "Dependencies installed."
 
 # --- Install Geekbench 5 CLI if not already installed ---
 if ! command -v geekbench5 &>/dev/null; then
@@ -40,7 +44,6 @@ if ! command -v geekbench5 &>/dev/null; then
       exit 1
     fi
     tar -xzf "/tmp/${GEEKBENCH_TAR}" -C /tmp
-    # The Geekbench executable is inside a folder named "Geekbench-<version>-Linux"
     if [ -f "/tmp/Geekbench-${GEEKBENCH_VERSION}-Linux/geekbench5" ]; then
       cp "/tmp/Geekbench-${GEEKBENCH_VERSION}-Linux/geekbench5" /usr/local/bin/
       chmod +x /usr/local/bin/geekbench5
@@ -78,66 +81,66 @@ TMPDIR=$(mktemp -d)
 
 # Create a timestamped report file.
 REPORTFILE="benchmark_report_$(date +'%Y%m%d_%H%M%S').txt"
+> "$REPORTFILE"  # initialize/empty the file
 
 # --- Utility Function ---
 # Convert bits-per-second to a human-readable string.
 convert_bps() {
   local bps=$1
   if (( bps >= 1000000000 )); then
-    # Convert to Gbits/sec
     printf "%.2f Gbits/sec" "$(echo "$bps/1000000000" | bc -l)"
   else
-    # Convert to Mbits/sec
     printf "%.2f Mbits/sec" "$(echo "$bps/1000000" | bc -l)"
   fi
 }
 
-# --- Begin Report Generation ---
+#############################
+# Start Report Generation   #
+#############################
+
+# Write header (date/time) to report
 {
-  # Header date/time (example: Thu 16 Jun 2022 10:42:59 AM CEST)
   date
   echo
+} >> "$REPORTFILE"
 
-  # --- Basic System Information ---
+#############################
+# Basic System Information  #
+#############################
+echo "Collecting basic system information..."
+{
   echo "Basic System Information:"
   echo "---------------------------------"
 
-  # Uptime (using uptime -p gives a “pretty” uptime)
   uptime_out=$(uptime -p)
   echo "Uptime     : ${uptime_out#up }"
 
-  # Processor and CPU details (using lscpu)
   cpu_model=$(lscpu | awk -F: '/Model name/ {gsub(/^ +/, "", $2); print $2; exit}')
   cpu_cores=$(lscpu | awk -F: '/^CPU\(s\)/ {gsub(/^ +/, "", $2); print $2; exit}')
   cpu_mhz=$(lscpu | awk -F: '/CPU MHz/ {gsub(/^ +/, "", $2); print $2; exit}')
   echo "Processor  : $cpu_model"
   echo "CPU cores  : $cpu_cores @ ${cpu_mhz} MHz"
 
-  # Check for AES-NI (search for "aes" in /proc/cpuinfo)
   if grep -qi aes /proc/cpuinfo; then
     echo "AES-NI     : ✔ Enabled"
   else
     echo "AES-NI     : ❌ Disabled"
   fi
 
-  # Check for virtualization support (vmx for Intel, svm for AMD)
   if grep -qiE 'vmx|svm' /proc/cpuinfo; then
     echo "VM-x/AMD-V : ✔ Enabled"
   else
     echo "VM-x/AMD-V : ❌ Disabled"
   fi
 
-  # RAM and Swap (from free -h)
   ram=$(free -h | awk '/^Mem:/ {print $2}')
   swap=$(free -h | awk '/^Swap:/ {print $2}')
   echo "RAM        : $ram"
   echo "Swap       : $swap"
 
-  # Disk size (using df -h on the root filesystem)
   disk=$(df -h / | awk 'NR==2 {print $2}')
   echo "Disk       : $disk"
 
-  # Distro (from /etc/os-release)
   if [ -f /etc/os-release ]; then
     . /etc/os-release
     echo "Distro     : $PRETTY_NAME"
@@ -145,89 +148,125 @@ convert_bps() {
     echo "Distro     : Unknown"
   fi
 
-  # Kernel version
   echo "Kernel     : $(uname -r)"
   echo
+} >> "$REPORTFILE"
+echo "Basic system information collected."
 
-  # --- fio Disk Speed Tests (Mixed R/W 50/50) ---
+#############################
+# fio Disk Speed Tests      #
+#############################
+echo "Starting fio disk speed tests (approx 2 minutes total)..."
+{
   echo "fio Disk Speed Tests (Mixed R/W 50/50):"
   echo "---------------------------------"
+} >> "$REPORTFILE"
 
-  # Run fio tests with different block sizes.
-  for bs in 4k 64k 512k 1m; do
-    echo "Running fio test with block size = $bs …"
+for bs in 4k 64k 512k 1m; do
+    echo "  Running fio test with block size = $bs (30 seconds)..."
     fio --name=randrw --rw=randrw --rwmixread=50 \
         --ioengine=libaio --direct=1 --size=1G --runtime=30 \
         --bs=$bs --group_reporting > "$TMPDIR/fio_${bs}.txt" 2>&1
-  done
+    echo "  Finished fio test for block size = $bs."
+done
 
+{
   echo
   echo "Results for fio tests:"
-  for bs in 4k 64k 512k 1m; do
-    echo "------ Block Size: $bs ------"
-    cat "$TMPDIR/fio_${bs}.txt"
-    echo
-  done
+} >> "$REPORTFILE"
 
-  # Clean up temporary fio files
-  rm -rf "$TMPDIR"
+for bs in 4k 64k 512k 1m; do
+    {
+      echo "------ Block Size: $bs ------"
+      cat "$TMPDIR/fio_${bs}.txt"
+      echo
+    } >> "$REPORTFILE"
+done
 
-  # --- iperf3 Network Speed Tests (IPv4) ---
+rm -rf "$TMPDIR"
+echo "fio tests completed."
+
+#############################
+# iperf3 Network Tests (IPv4)
+#############################
+echo "Starting iperf3 IPv4 tests (approx 1.5 minutes total)..."
+{
   echo "iperf3 Network Speed Tests (IPv4):"
   echo "---------------------------------"
-  for entry in "${ipv4_servers[@]}"; do
+} >> "$REPORTFILE"
+
+for entry in "${ipv4_servers[@]}"; do
     IFS='|' read -r provider location server <<< "$entry"
-    echo -n "$provider       | $location | "
-    # Run a 10-second iperf3 test in JSON mode.
+    echo "  Running iperf3 IPv4 test for $provider at $location..."
     result=$(iperf3 -c "$server" -t 10 -J 2>/dev/null)
     if command -v jq >/dev/null 2>&1; then
       sent=$(echo "$result" | jq '.end.sum_sent.bits_per_second')
       recv=$(echo "$result" | jq '.end.sum_received.bits_per_second')
       send_hr=$(convert_bps "$sent")
       recv_hr=$(convert_bps "$recv")
-      echo "Send Speed: $send_hr | Recv Speed: $recv_hr"
+      line="$provider       | $location | Send Speed: $send_hr | Recv Speed: $recv_hr"
     else
-      echo " (Install jq to parse iperf3 JSON output)"
+      line="$provider       | $location | (Install jq to parse iperf3 JSON output)"
     fi
-  done
-  echo
+    echo "$line" >> "$REPORTFILE"
+done
+echo "iperf3 IPv4 tests completed."
 
-  # --- iperf3 Network Speed Tests (IPv6) ---
+#############################
+# iperf3 Network Tests (IPv6)
+#############################
+echo "Starting iperf3 IPv6 tests (approx 1.5 minutes total)..."
+{
   echo "iperf3 Network Speed Tests (IPv6):"
   echo "---------------------------------"
-  for entry in "${ipv6_servers[@]}"; do
+} >> "$REPORTFILE"
+
+for entry in "${ipv6_servers[@]}"; do
     IFS='|' read -r provider location server <<< "$entry"
-    echo -n "$provider       | $location | "
+    echo "  Running iperf3 IPv6 test for $provider at $location..."
     result=$(iperf3 -c "$server" -t 10 -J 2>/dev/null)
     if command -v jq >/dev/null 2>&1; then
       sent=$(echo "$result" | jq '.end.sum_sent.bits_per_second')
       recv=$(echo "$result" | jq '.end.sum_received.bits_per_second')
       send_hr=$(convert_bps "$sent")
       recv_hr=$(convert_bps "$recv")
-      echo "Send Speed: $send_hr | Recv Speed: $recv_hr"
+      line="$provider       | $location | Send Speed: $send_hr | Recv Speed: $recv_hr"
     else
-      echo " (Install jq to parse iperf3 JSON output)"
+      line="$provider       | $location | (Install jq to parse iperf3 JSON output)"
     fi
-  done
-  echo
+    echo "$line" >> "$REPORTFILE"
+done
+echo "iperf3 IPv6 tests completed."
 
-  # --- Geekbench 5 Benchmark Test ---
+#############################
+# Geekbench 5 Benchmark Test#
+#############################
+echo "Starting Geekbench 5 test (this may take 5–10 minutes)..."
+{
   echo "Geekbench 5 Benchmark Test:"
   echo "---------------------------------"
   echo "Running Geekbench 5… (this may take several minutes)"
-  gb_out=$(geekbench5 --upload 2>/dev/null)
-  # Extract scores if possible.
-  gb_single=$(echo "$gb_out" | grep -i "Single-Core Score" | awk -F: '{print $2}' | xargs)
-  gb_multi=$(echo "$gb_out" | grep -i "Multi-Core Score" | awk -F: '{print $2}' | xargs)
-  gb_full=$(echo "$gb_out" | grep -Eo 'https?://[^ ]+' | head -n1)
+} >> "$REPORTFILE"
+
+gb_out=$(geekbench5 --upload 2>/dev/null)
+gb_single=$(echo "$gb_out" | grep -i "Single-Core Score" | awk -F: '{print $2}' | xargs)
+gb_multi=$(echo "$gb_out" | grep -i "Multi-Core Score" | awk -F: '{print $2}' | xargs)
+gb_full=$(echo "$gb_out" | grep -Eo 'https?://[^ ]+' | head -n1)
+{
   echo "Test            | Value"
   echo "                |"
   echo "Single Core     | ${gb_single:-N/A}"
   echo "Multi Core      | ${gb_multi:-N/A}"
   echo "Full Test       | ${gb_full:-N/A}"
   echo
-
   echo "Benchmark complete."
-} > "$REPORTFILE"
+} >> "$REPORTFILE"
+echo "Geekbench 5 test completed."
 
+#############################
+# Final Summary             #
+#############################
+END_TIME=$(date +%s)
+ELAPSED=$(( END_TIME - START_TIME ))
+echo "Benchmarking complete. Total elapsed time: ${ELAPSED} seconds."
 echo "Benchmark report saved to $REPORTFILE"
