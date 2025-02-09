@@ -1,107 +1,85 @@
 #!/bin/bash
 # run_sysbench.sh
 #
-# This script runs a suite of sysbench benchmarks:
-#   - CPU (single core and all cores)
-#   - Memory
-#   - File I/O (prepare, run, cleanup)
-#   - Threads (dummy test)
-#   - Mutex
-#
-# Progress messages are printed to the console,
-# and all output is compiled into a minimalistic report file.
+# This script runs a suite of sysbench benchmarks and saves a minimalistic
+# summary of each test (capturing only the last few lines of output) to a text file.
 #
 # Make sure sysbench is installed on your system.
 
-# Name of the output report file
 OUTPUT_FILE="sysbench_results.txt"
 
-# Helper function to print and log messages
-log() {
-    echo -e "$1" | tee -a "$OUTPUT_FILE"
+# Print a header to the output file.
+cat <<EOF > "$OUTPUT_FILE"
+========================================
+       Sysbench Benchmark Report Summary
+       Started: $(date)
+========================================
+
+EOF
+
+# Helper function to run a benchmark test,
+# capture its output, and then extract a short summary.
+run_benchmark() {
+    local test_label="$1"
+    shift
+    echo ">> Starting ${test_label}..." | tee -a "$OUTPUT_FILE"
+    # Run the sysbench command passed as arguments and capture the output.
+    output=$("$@" 2>&1)
+    # Extract the last 5 lines of output (assumed to be the summary).
+    summary=$(echo "$output" | tail -n 5)
+    echo "$summary" | tee -a "$OUTPUT_FILE"
+    echo ">> Completed ${test_label}." | tee -a "$OUTPUT_FILE"
+    echo "" | tee -a "$OUTPUT_FILE"
 }
 
-# Check if sysbench is installed
+# Check if sysbench is installed.
 if ! command -v sysbench >/dev/null 2>&1; then
     echo "Error: sysbench is not installed. Please install sysbench and try again." >&2
     exit 1
 fi
 
-# Start a new report
-cat <<EOF > "$OUTPUT_FILE"
-========================================
-         Sysbench Benchmark Report
-         Started: $(date)
-========================================
-
-EOF
-
 ##############################
 # CPU Benchmark (Single Core)
 ##############################
-log ">> Starting CPU benchmark (Single Core)..."
-log "----------------------------------------"
-# Run the CPU test with 1 thread and a high prime limit (tweak --cpu-max-prime as needed)
-sysbench cpu --cpu-max-prime=20000 --threads=1 run | tee -a "$OUTPUT_FILE"
-log ">> Completed CPU benchmark (Single Core)."
-log "\n"
+run_benchmark "CPU Benchmark (Single Core)" sysbench cpu --cpu-max-prime=20000 --threads=1 run
 
 #############################
 # CPU Benchmark (All Cores)
 #############################
 NUM_THREADS=$(nproc)
-log ">> Starting CPU benchmark (All Cores: $NUM_THREADS threads)..."
-log "----------------------------------------"
-sysbench cpu --cpu-max-prime=20000 --threads="$NUM_THREADS" run | tee -a "$OUTPUT_FILE"
-log ">> Completed CPU benchmark (All Cores)."
-log "\n"
+run_benchmark "CPU Benchmark (All Cores with ${NUM_THREADS} Threads)" sysbench cpu --cpu-max-prime=20000 --threads="$NUM_THREADS" run
 
 ########################
 # Memory Benchmark Test
 ########################
-log ">> Starting Memory benchmark..."
-log "----------------------------------------"
-# The memory test will transfer a total of 10GB (adjust as needed)
-sysbench memory --memory-total-size=10G run | tee -a "$OUTPUT_FILE"
-log ">> Completed Memory benchmark."
-log "\n"
+run_benchmark "Memory Benchmark" sysbench memory --memory-total-size=10G run
 
-#########################
+#############################
 # File I/O Benchmark Test
-#########################
-log ">> Starting File I/O benchmark..."
-log "----------------------------------------"
-# Prepare the file I/O test (this creates test files totaling 1GB)
-log ">> Preparing File I/O test..."
-sysbench fileio --file-total-size=1G prepare | tee -a "$OUTPUT_FILE"
-
-# Run the file I/O test
-log ">> Running File I/O test..."
-sysbench fileio --file-total-size=1G run | tee -a "$OUTPUT_FILE"
-
-# Cleanup test files
-log ">> Cleaning up File I/O test..."
-sysbench fileio --file-total-size=1G cleanup | tee -a "$OUTPUT_FILE"
-log ">> Completed File I/O benchmark."
-log "\n"
+#############################
+echo ">> Starting File I/O Benchmark..." | tee -a "$OUTPUT_FILE"
+echo ">> Preparing test files..." | tee -a "$OUTPUT_FILE"
+prepare_out=$(sysbench fileio --file-total-size=1G prepare 2>&1)
+# (Optionally, you can omit or further summarize the prepare phase.)
+echo ">> Running File I/O test..." | tee -a "$OUTPUT_FILE"
+fio_run_out=$(sysbench fileio --file-total-size=1G run 2>&1)
+echo ">> Cleaning up test files..." | tee -a "$OUTPUT_FILE"
+cleanup_out=$(sysbench fileio --file-total-size=1G cleanup 2>&1)
+# Capture only the summary from the 'run' phase.
+fio_summary=$(echo "$fio_run_out" | tail -n 5)
+echo "$fio_summary" | tee -a "$OUTPUT_FILE"
+echo ">> Completed File I/O Benchmark." | tee -a "$OUTPUT_FILE"
+echo "" | tee -a "$OUTPUT_FILE"
 
 ########################
 # Threads Benchmark Test
 ########################
-log ">> Starting Threads benchmark..."
-log "----------------------------------------"
-sysbench threads run | tee -a "$OUTPUT_FILE"
-log ">> Completed Threads benchmark."
-log "\n"
+run_benchmark "Threads Benchmark" sysbench threads run
 
 ########################
 # Mutex Benchmark Test
 ########################
-log ">> Starting Mutex benchmark..."
-log "----------------------------------------"
-sysbench mutex run | tee -a "$OUTPUT_FILE"
-log ">> Completed Mutex benchmark."
-log "\n"
+run_benchmark "Mutex Benchmark" sysbench mutex run
 
-log "========================================"
-log "Benchmarking complete. Results saved in: $OUTPUT_FILE"
+echo "========================================" | tee -a "$OUTPUT_FILE"
+echo "Benchmarking complete. Summary saved in: $OUTPUT_FILE" | tee -a "$OUTPUT_FILE"
