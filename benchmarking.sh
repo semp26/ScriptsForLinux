@@ -29,13 +29,13 @@ fio_value=$(echo "$fio_output" | grep -E "read, MiB/s:" | grep -Eo '[0-9]+\.[0-9
 fio_value=${fio_value:-0.00}
 sysbench fileio --file-total-size=1G cleanup > /dev/null 2>&1
 
-# 4️⃣ Threads Benchmark - Extract "events per second"
-thr_output=$(sysbench threads run 2>&1)
+# 4️⃣ Threads Benchmark (Fixed) - Extract "events per second"
+thr_output=$(sysbench threads --time=10 run 2>&1)
 thr_value=$(echo "$thr_output" | grep -E "events per second:" | grep -Eo '[0-9]+\.[0-9]+' | tail -n 1)
 thr_value=${thr_value:-0.00}
 
-# 5️⃣ Mutex Benchmark - Extract "events per second"
-mutex_output=$(sysbench mutex run 2>&1)
+# 5️⃣ Mutex Benchmark (Fixed) - Extract "events per second"
+mutex_output=$(sysbench mutex --time=10 run 2>&1)
 mutex_value=$(echo "$mutex_output" | grep -E "events per second:" | grep -Eo '[0-9]+\.[0-9]+' | tail -n 1)
 mutex_value=${mutex_value:-0.00}
 
